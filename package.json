@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "npm run build && git checkout -B gh-pages && git add -f dist && git commit -m 'deploy: update build' && git subtree push --prefix dist origin gh-pages && git checkout main"
   },
   "keywords": [
     "fantasy-map",
