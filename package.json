@@ -1,0 +1,48 @@
+{
+  "name": "open-nation-builder",
+  "private": false,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "An open-source, editable procedural fantasy map and nation builder toolkit built with TypeScript, Voronoi Delaunay, and HTML5 Canvas.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "fantasy-map",
+    "nation-builder",
+    "worldbuilding",
+    "procedural-generation",
+    "voronoi",
+    "geopolitics",
+    "canvas",
+    "typescript",
+    "map-generator",
+    "open-source"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "~6.0.2",
+    "vite": "^8.0.10"
+  },
+  "dependencies": {
+    "@types/d3-delaunay": "^6.0.4",
+    "@types/seedrandom": "^3.0.8",
+    "d3-delaunay": "^6.0.4",
+    "detect-libc": "^2.1.2",
+    "fdir": "^6.5.0",
+    "lightningcss": "^1.32.0",
+    "lightningcss-linux-x64-gnu": "^1.32.0",
+    "nanoid": "^3.3.11",
+    "picocolors": "^1.1.1",
+    "picomatch": "^4.0.4",
+    "postcss": "^8.5.10",
+    "rolldown": "^1.0.0-rc.17",
+    "seedrandom": "^3.0.5",
+    "simplex-noise": "^4.0.3",
+    "source-map-js": "^1.2.1",
+    "tinyglobby": "^0.2.16"
+  }
+}

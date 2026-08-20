@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenNation Builder - Fantasy Map & Nation Generator</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        #ui-overlay { width: 330px; }
+        .inspector-panel { 
+            background: rgba(20, 25, 40, 0.95); 
+            padding: 14px; 
+            border-radius: 8px; 
+            border: 1px solid #4a5d8a; 
+            margin-top: 8px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); 
+        }
+        .inspector-row { 
+            display: flex; 
+            align-items: center; 
+            justify-content: space-between; 
+            margin-bottom: 8px; 
+            gap: 10px; 
+        }
+        .inspector-label { 
+            font-size: 11px; 
+            text-transform: uppercase; 
+            color: #90a4ae; 
+            font-weight: 600;
+        }
+        .inspector-input { 
+            background: #0f1422; 
+            border: 1px solid #37474f; 
+            color: #4fc3f7; 
+            padding: 4px 8px; 
+            border-radius: 4px; 
+            width: 130px; 
+            font-size: 12px; 
+        }
+        .tool-active { 
+            background: #00c853 !important; 
+            color: white !important; 
+            box-shadow: 0 0 10px rgba(0,200,83,0.6); 
+            border-color: #b9f6ca !important;
+        }
+        .btn-tool { 
+            font-size: 16px; 
+            padding: 8px !important; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn-action-primary {
+            background: #1976d2 !important;
+            font-weight: bold;
+            border-color: #42a5f5;
+        }
+        .btn-action-primary:hover {
+            background: #1565c0 !important;
+        }
+        .btn-action-success {
+            background: #2e7d32 !important;
+            font-weight: bold;
+            border-color: #66bb6a;
+        }
+        .btn-action-success:hover {
+            background: #1b5e20 !important;
+        }
+        .header-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .badge-pro {
+            background: #6200ea;
+            color: #fff;
+            font-size: 9px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <canvas id="main-canvas"></canvas>
+        
+        <button id="btn-toggle-ui" style="position: absolute; top: 10px; left: 10px; z-index: 101; font-weight: bold;">
+            ☰ Menu Builder
+        </button>
+
+        <div id="ui-overlay">
+            <div id="ui-scroll-container">
+                <div class="header-title">
+                    <span>🗺️ OpenNation Builder</span>
+                    <span class="badge-pro">OPEN SOURCE</span>
+                </div>
+
+                <!-- View Theme Selection -->
+                <div class="ui-group">
+                    <label>🎨 Tema Tampilan Visual:</label>
+                    <select id="select-view">
+                        <option value="biome">🌿 Bioma Alami (Ecosystem)</option>
+                        <option value="antique">📜 Kartografi Kuno (Fantasy Parchment)</option>
+                        <option value="elevation">🏔️ Topografi & Ketinggian</option>
+                        <option value="political">🌐 Atlas Politik Kontemporer</option>
+                        <option value="cyberpunk">🕶️ Cyberpunk Neon Grid</option>
+                        <option value="monochrome">🖨️ Blueprint Arsitektur</option>
+                        <option value="temperature">🔥 Distribusi Suhu</option>
+                        <option value="moisture">💧 Distribusi Kelembaban</option>
+                        <option value="wind">💨 Arah Sirkulasi Angin</option>
+                    </select>
+                </div>
+
+                <!-- Editor Toolset -->
+                <div class="ui-group">
+                    <label>🛠️ Alat Editor Interaktif:</label>
+                    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:4px;">
+                        <button id="btn-mode-inspect" title="Periksa Wilayah & Edit Info" class="btn-tool tool-active">🔍</button>
+                        <button id="btn-mode-drag" title="Geser Peta (Pan)" class="btn-tool">🖐️</button>
+                        <button id="btn-mode-paint-nation" title="Lukis Batas Negara" class="btn-tool">🎨</button>
+                        <button id="btn-mode-paint-province" title="Lukis Batas Provinsi" class="btn-tool">🖌️</button>
+                        
+                        <button id="btn-mode-place-city" title="Tambah Kota Biasa" class="btn-tool">🏙️</button>
+                        <button id="btn-mode-place-capital" title="Tambah Ibu Kota Kerajaan/Negara" class="btn-tool">👑</button>
+                        <button id="btn-mode-add-label" title="Tambah Label Teks Bebas" class="btn-tool">🏷️</button>
+                        <button id="btn-mode-erase" title="Hapus Kota / Hapus Klaim Wilayah" class="btn-tool">🧹</button>
+
+                        <button id="btn-mode-raise" title="Sculpt: Naikkan Daratan (Gunung/Pulau)" class="btn-tool">⛰️</button>
+                        <button id="btn-mode-lower" title="Sculpt: Turunkan Daratan (Laut/Danau)" class="btn-tool">🌊</button>
+                        <button id="btn-mode-smooth" title="Sculpt: Ratakan Ketinggian Lereng" class="btn-tool">〰️</button>
+                    </div>
+                </div>
+
+                <!-- Live Inspector Panel -->
+                <div class="inspector-panel" id="inspector">
+                    <div style="text-align:center; border-bottom:1px solid #4a5d8a; padding-bottom:6px; margin-bottom:10px; font-weight:bold; color:#fff; font-size:12px; letter-spacing:0.5px;">
+                        ⚡ LIVE REGION INSPECTOR
+                    </div>
+                    <div id="inspector-content">
+                        <p style="color:#888; font-size:11px; text-align:center;">Klik poligon wilayah daratan di peta untuk memeriksa atau mengubah data negara, provinsi, dan kota.</p>
+                    </div>
+                </div>
+
+                <!-- Parameters & Brush Settings -->
+                <div class="ui-group" style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px;">
+                    <label>🎭 Transparansi Politik: <span id="val-opacity">50</span>%</label>
+                    <input type="range" id="input-opacity" min="0" max="100" value="50">
+                    
+                    <label style="margin-top:8px;">🆔 ID Wilayah Kuas: <span id="val-active-id">0</span></label>
+                    <input type="range" id="input-active-id" min="0" max="49" value="0">
+                    
+                    <label style="margin-top:8px;">🖌️ Ukuran Radius Kuas: <span id="val-brush-size">45</span>px</label>
+                    <input type="range" id="input-brush-size" min="10" max="250" value="45">
+                </div>
+
+                <!-- Map Generation & Management -->
+                <div class="ui-group">
+                    <label>🎲 Buat / Atur Dunia Baru:</label>
+                    <div style="display:flex; gap:6px;">
+                        <select id="select-preset" style="flex:1;">
+                            <option value="continents">Benua & Samudera</option>
+                            <option value="pangea">Pangaea (Superkontinen)</option>
+                            <option value="archipelago">Kepulauan (Archipelago)</option>
+                            <option value="twin">Benua Kembar (Twin Worlds)</option>
+                        </select>
+                        <button id="btn-new-world" style="padding: 6px 12px; font-size:12px;" title="Buat Peta Baru Berdasarkan Preset">🎲 Acak</button>
+                    </div>
+
+                    <button id="btn-gen-all" class="btn-action-primary" style="margin-top:4px;">✨ Hasilkan Wilayah Otomatis</button>
+                </div>
+
+                <!-- Export & Import Controls -->
+                <div class="ui-group">
+                    <label>💾 Ekspor & Impor Proyek:</label>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+                        <button id="btn-export-all" class="btn-action-success">💾 Simpan JSON</button>
+                        <button id="btn-export-png" style="background:#5e35b1; font-weight:bold;">🖼️ Ekspor PNG</button>
+                    </div>
+                    <input type="file" id="input-map" style="display:none;" accept=".json">
+                    <button onclick="document.getElementById('input-map').click()" style="background:#37474f; font-size:11px; margin-top:2px;">📂 Buka File Peta (JSON)</button>
+                </div>
+            </div>
+        </div>
+        
+        <div id="legend"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
