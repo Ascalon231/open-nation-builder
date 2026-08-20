@@ -30,10 +30,12 @@ let nationNames: Map<number, string> = new Map();
 let nationColors: Map<number, string> = new Map();
 let provinceNames: Map<number, string> = new Map();
 
+// View & Navigation State
 let currentView = "biome";
 let currentMode = "inspect";
 let panX = 0;
 let panY = 0;
+let zoom = 1.0;
 let isPanning = false;
 let isDrawing = false;
 let lastMouseX = 0;
@@ -53,10 +55,26 @@ function getDefaultColor(id: number): string {
     return `hsl(${hue}, 70%, 50%)`;
 }
 
+// Convert screen coordinates to world/mesh coordinates
+function screenToWorld(screenX: number, screenY: number): { x: number, y: number } {
+    const mw = mesh.width;
+    const mh = mesh.height;
+    
+    // Reverse zoom and pan transformation
+    const worldRawX = (screenX - panX) / zoom;
+    const worldRawY = (screenY - panY) / zoom;
+    
+    // Cylindrical horizontal wrap
+    const worldX = ((worldRawX % mw) + mw) % mw;
+    const worldY = Math.max(0, Math.min(mh, worldRawY));
+    
+    return { x: worldX, y: worldY };
+}
+
 // Generate New Procedural World
-export function generateNewWorld(preset: string = "continents", seed: string = Math.random().toString(), numPoints: number = 800) {
-    const width = window.innerWidth || 1200;
-    const height = window.innerHeight || 800;
+export function generateNewWorld(preset: string = "continents", seed: string = Math.random().toString(), numPoints: number = 850) {
+    const width = 1400;
+    const height = 800;
     mesh = new MeshEngine(width, height, numPoints, seed);
     mesh.relax(2);
 
@@ -83,7 +101,7 @@ export function generateNewWorld(preset: string = "continents", seed: string = M
             const d2 = Math.hypot((x - mw * 0.7) / mw, (y - mh * 0.5) / mh);
             h = Math.max(0.1, 0.75 - Math.min(d1, d2) * 2.8) + (n - 0.5) * 0.4;
         } else {
-            // Standard / Continents
+            // Standard Continents
             const lat = Math.abs((y / mh) - 0.5);
             h = n + (0.1 - lat * 0.2);
         }
@@ -91,7 +109,7 @@ export function generateNewWorld(preset: string = "continents", seed: string = M
         elevations[i] = Math.max(0, Math.min(1, h));
     }
 
-    // Thermal erosion & simulation
+    // Thermal erosion & sink filling
     const neighbors = (idx: number) => mesh.getNeighbors(idx);
     for (let i = 0; i < 2; i++) {
         elevations = ErosionEngine.thermalErosion(elevations, neighbors);
@@ -103,7 +121,7 @@ export function generateNewWorld(preset: string = "continents", seed: string = M
     // Auto generate initial geopolitics
     cellNations = NationEngine.generateNations(mesh, elevations, 6);
     cellProvinces = NationEngine.generateNations(mesh, elevations, 24);
-    cities = NationEngine.autoPlaceCities(mesh, elevations, waterFlux, cellNations, 12);
+    cities = NationEngine.autoPlaceCities(mesh, elevations, waterFlux, cellNations, 14);
 
     // Populate Initial Names
     nationNames.clear();
@@ -121,7 +139,12 @@ export function generateNewWorld(preset: string = "continents", seed: string = M
         provinceNames.set(pID, NationEngine.generateName("province"));
     });
 
+    // Center map view
+    panX = (canvas.width - mw * zoom) / 2;
+    panY = (canvas.height - mh * zoom) / 2;
+
     isDataReady = true;
+    updateActiveIDLabel();
     updateLegendUI();
     render();
 }
@@ -149,20 +172,21 @@ inputMap.addEventListener("change", (e: any) => {
         try {
             const data = JSON.parse(event.target.result);
             elevations = new Float32Array(data.elevations);
-            mesh = new MeshEngine(data.width || window.innerWidth, data.height || window.innerHeight, new Float64Array(data.points));
-            
+            mesh = new MeshEngine(data.width || 1400, data.height || 800, new Float64Array(data.points));
+
             cellNations = data.cellNations ? new Int16Array(data.cellNations) : new Int16Array(elevations.length).fill(-1);
             cellProvinces = data.cellProvinces ? new Int16Array(data.cellProvinces) : new Int16Array(elevations.length).fill(-1);
             cities = data.cities || [];
             markers = data.markers || [];
             customLabels = data.customLabels || [];
-            
+
             nationNames = new Map(data.nationNames || []);
             nationColors = new Map(data.nationColors || []);
             provinceNames = new Map(data.provinceNames || []);
-            
+
             syncClimate();
             isDataReady = true;
+            updateActiveIDLabel();
             updateLegendUI();
             render();
         } catch (err) {
@@ -173,11 +197,10 @@ inputMap.addEventListener("change", (e: any) => {
 });
 
 // Canvas Interaction Handler
-function handleInteraction(x: number, y: number, isMove: boolean) {
+function handleInteraction(screenX: number, screenY: number, isMove: boolean) {
     if (!isDataReady || !mesh) return;
     const mw = mesh.width;
-    const lx = ((x - panX) % mw + mw) % mw;
-    const ly = y - panY;
+    const { x: lx, y: ly } = screenToWorld(screenX, screenY);
     const idx = mesh.findClosestPoint(lx, ly);
 
     if (currentMode === "inspect") {
@@ -205,6 +228,7 @@ function handleInteraction(x: number, y: number, isMove: boolean) {
                 }
             }
         }
+        updateActiveIDLabel();
         render();
     } else if (currentMode === "sculpt-raise" || currentMode === "sculpt-lower" || currentMode === "sculpt-smooth") {
         const delta = currentMode === "sculpt-raise" ? 0.04 : currentMode === "sculpt-lower" ? -0.04 : 0;
@@ -254,14 +278,26 @@ function handleInteraction(x: number, y: number, isMove: boolean) {
             customLabels.push({ text, x: lx, y: ly });
             render();
         }
-    } else if (!isMove && currentMode === "erase") {
-        // Erase city or clear nation claims
-        const cityIdx = cities.findIndex(c => c.cellIndex === idx);
-        if (cityIdx !== -1) {
-            cities.splice(cityIdx, 1);
-        } else {
-            cellNations[idx] = -1;
-            cellProvinces[idx] = -1;
+    } else if (currentMode === "erase") {
+        // Erase cities under brush
+        for (let cIdx = cities.length - 1; cIdx >= 0; cIdx--) {
+            const c = cities[cIdx];
+            let dx = mesh.points[c.cellIndex * 2] - lx;
+            if (dx > mw * 0.5) dx -= mw;
+            else if (dx < -mw * 0.5) dx += mw;
+            if (Math.hypot(dx, mesh.points[c.cellIndex * 2 + 1] - ly) < brushSize) {
+                cities.splice(cIdx, 1);
+            }
+        }
+        // Clear nation claims under brush
+        for (let i = 0; i < elevations.length; i++) {
+            let dx = mesh.points[i * 2] - lx;
+            if (dx > mw * 0.5) dx -= mw;
+            else if (dx < -mw * 0.5) dx += mw;
+            if (Math.hypot(dx, mesh.points[i * 2 + 1] - ly) < brushSize) {
+                cellNations[i] = -1;
+                cellProvinces[i] = -1;
+            }
         }
         render();
     }
@@ -281,7 +317,7 @@ function showInspector(idx: number) {
 
     content.innerHTML = `
         <div class="inspector-row">
-            <span class="inspector-label">Negara ID ${nationID >= 0 ? nationID : 'Tak Bertuan'}</span>
+            <span class="inspector-label">Negara ${nationID >= 0 ? 'ID ' + nationID : ''}</span>
             ${nationID >= 0 ? `
                 <div style="display:flex; align-items:center; gap:4px;">
                     <input type="color" id="edit-nation-color" value="${nationColor.startsWith('#') ? nationColor : '#4fc3f7'}" style="width:26px; height:26px; padding:0; border:none; background:transparent; cursor:pointer;">
@@ -290,7 +326,7 @@ function showInspector(idx: number) {
             ` : '<span style="color:#666; font-size:12px;">Tanpa Klaim</span>'}
         </div>
         <div class="inspector-row">
-            <span class="inspector-label">Provinsi ID ${provID >= 0 ? provID : '-'}</span>
+            <span class="inspector-label">Provinsi ${provID >= 0 ? 'ID ' + provID : ''}</span>
             ${provID >= 0 ? `
                 <input class="inspector-input" id="edit-province-name" value="${provinceNames.get(provID) || 'Prov ' + provID}">
             ` : '<span style="color:#666; font-size:12px;">Tanpa Provinsi</span>'}
@@ -319,10 +355,10 @@ function showInspector(idx: number) {
         </div>
     `;
 
-    // Event Listeners for Live Editing
     document.getElementById("edit-nation-name")?.addEventListener("input", (e: any) => {
         if (nationID >= 0) {
             nationNames.set(nationID, e.target.value);
+            updateActiveIDLabel();
             render();
         }
     });
@@ -344,6 +380,15 @@ function showInspector(idx: number) {
             render();
         });
     }
+}
+
+function updateActiveIDLabel() {
+    const valEl = document.getElementById("val-active-id");
+    if (!valEl) return;
+    const name = (currentMode === "paint-province") 
+        ? (provinceNames.get(activeID) || `Provinsi ${activeID}`)
+        : (nationNames.get(activeID) || `Negara ${activeID}`);
+    valEl.textContent = `${activeID} (${name})`;
 }
 
 function updateLegendUI() {
@@ -373,6 +418,10 @@ function updateLegendUI() {
         leg.innerHTML = `<div class="legend-item"><span style="background:#d8c7a5"></span> Gaya Kartografi Kuno</div>`;
     } else if (currentView === "cyberpunk") {
         leg.innerHTML = `<div class="legend-item"><span style="background:#00ffea"></span> Grid Neon Geopolitik</div>`;
+    } else if (currentView === "political") {
+        leg.innerHTML = `<div class="legend-item"><span style="background:#2c3e50"></span> Atlas Politik Kontemporer</div>`;
+    } else if (currentView === "provinces") {
+        leg.innerHTML = `<div class="legend-item"><span style="background:#34495e"></span> Pembagian Provinsi / Sub-Wilayah</div>`;
     } else {
         leg.innerHTML = "";
     }
@@ -380,11 +429,11 @@ function updateLegendUI() {
 
 // Master Render Loop
 function render() {
-    if (!isDataReady) return;
+    if (!isDataReady || !mesh) return;
     renderer.render(
         mesh, elevations, [], currentView,
         temperatures, moistures, waterFlux,
-        undefined, undefined, panX, panY, true,
+        undefined, undefined, panX, panY, zoom, true,
         windX, windY, markers, customLabels
     );
     drawPoliticalOverlay();
@@ -392,28 +441,35 @@ function render() {
 }
 
 function drawPoliticalOverlay() {
-    if (politicalOpacity <= 0) return;
+    if (politicalOpacity <= 0 || !mesh) return;
     const mw = mesh.width;
     const cw = canvas.width;
-    const startX = Math.floor((-panX - mw) / mw) * mw;
-    const endX = cw - panX;
+    const scaledWidth = mw * zoom;
+
+    const startRepeat = Math.floor((-panX - scaledWidth) / scaledWidth) - 1;
+    const endRepeat = Math.ceil((cw - panX + scaledWidth) / scaledWidth) + 1;
 
     ctx.globalAlpha = politicalOpacity;
 
-    for (let xOff = startX; xOff <= endX; xOff += mw) {
+    for (let r = startRepeat; r <= endRepeat; r++) {
+        const xShift = r * mw;
         ctx.save();
-        ctx.translate(panX + xOff, panY);
+        ctx.translate(panX + xShift * zoom, panY);
+        ctx.scale(zoom, zoom);
 
         for (let i = 0; i < elevations.length; i++) {
             const nID = cellNations[i];
             const pID = cellProvinces[i];
             const displayID = (currentView === "provinces") ? pID : nID;
-            
+
             if (displayID === -1 || elevations[i] <= 0.5) continue;
             const poly = mesh.voronoi.cellPolygon(i);
             if (!poly) continue;
 
-            const color = currentView === "provinces" ? getDefaultColor(pID + 10) : (nationColors.get(nID) || getDefaultColor(nID));
+            const color = (currentView === "provinces") 
+                ? getDefaultColor(pID + 12) 
+                : (nationColors.get(nID) || getDefaultColor(nID));
+                
             ctx.fillStyle = color;
             ctx.beginPath();
             ctx.moveTo(poly[0][0], poly[0][1]);
@@ -425,8 +481,8 @@ function drawPoliticalOverlay() {
         }
 
         // Draw Nation Borders
-        ctx.strokeStyle = "rgba(0, 0, 0, 0.4)";
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.45)";
+        ctx.lineWidth = 1.4 / zoom;
         for (let i = 0; i < elevations.length; i++) {
             const nID = cellNations[i];
             if (nID === -1 || elevations[i] <= 0.5) continue;
@@ -446,14 +502,19 @@ function drawPoliticalOverlay() {
 }
 
 function drawCities() {
+    if (!mesh) return;
     const mw = mesh.width;
     const cw = canvas.width;
-    const startX = Math.floor((-panX - mw) / mw) * mw;
-    const endX = cw - panX;
+    const scaledWidth = mw * zoom;
 
-    for (let xOff = startX; xOff <= endX; xOff += mw) {
+    const startRepeat = Math.floor((-panX - scaledWidth) / scaledWidth) - 1;
+    const endRepeat = Math.ceil((cw - panX + scaledWidth) / scaledWidth) + 1;
+
+    for (let r = startRepeat; r <= endRepeat; r++) {
+        const xShift = r * mw;
         ctx.save();
-        ctx.translate(panX + xOff, panY);
+        ctx.translate(panX + xShift * zoom, panY);
+        ctx.scale(zoom, zoom);
 
         cities.forEach(c => {
             const x = mesh.points[c.cellIndex * 2];
@@ -462,7 +523,7 @@ function drawCities() {
             // City Icon
             ctx.font = c.isCapital ? "18px Arial" : "14px Arial";
             ctx.textAlign = "center";
-            ctx.shadowBlur = 8;
+            ctx.shadowBlur = 6;
             ctx.shadowColor = "rgba(0,0,0,0.9)";
             ctx.fillStyle = "#ffffff";
             ctx.fillText(c.isCapital ? "👑" : "🏙️", x, y + 4);
@@ -483,6 +544,7 @@ function setMode(m: string, btnId: string) {
     currentMode = m;
     document.querySelectorAll("#ui-overlay .btn-tool").forEach(b => b.classList.remove("tool-active"));
     document.getElementById(btnId)?.classList.add("tool-active");
+    updateActiveIDLabel();
 }
 
 document.getElementById("btn-mode-inspect")?.addEventListener("click", () => setMode("inspect", "btn-mode-inspect"));
@@ -505,19 +567,21 @@ document.getElementById("btn-gen-all")?.addEventListener("click", () => {
     cities = NationEngine.autoPlaceCities(mesh, elevations, waterFlux, cellNations, 16);
 
     nationNames.clear();
+    nationColors.clear();
     const uniqueNations = new Set(Array.from(cellNations).filter(n => n >= 0));
     uniqueNations.forEach(nID => {
         nationNames.set(nID, NationEngine.generateName("nation"));
         nationColors.set(nID, getDefaultColor(nID));
     });
 
+    updateActiveIDLabel();
     render();
 });
 
-// New Map Generator Modal / Quick Action
+// New Map Generator Action
 document.getElementById("btn-new-world")?.addEventListener("click", () => {
     const preset = (document.getElementById("select-preset") as HTMLSelectElement)?.value || "continents";
-    generateNewWorld(preset, Math.random().toString(), 900);
+    generateNewWorld(preset, Math.random().toString(), 850);
 });
 
 // Export JSON
@@ -539,7 +603,7 @@ document.getElementById("btn-export-all")?.addEventListener("click", () => {
     };
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-    a.download = "nation-builder-project.json";
+    a.download = "opennation-project.json";
     a.click();
 });
 
@@ -560,7 +624,7 @@ document.getElementById("input-opacity")?.addEventListener("input", (e: any) => 
 });
 document.getElementById("input-active-id")?.addEventListener("input", (e: any) => {
     activeID = parseInt(e.target.value);
-    document.getElementById("val-active-id")!.textContent = activeID.toString();
+    updateActiveIDLabel();
 });
 document.getElementById("input-brush-size")?.addEventListener("input", (e: any) => {
     brushSize = parseInt(e.target.value);
@@ -575,7 +639,7 @@ document.getElementById("btn-toggle-ui")?.addEventListener("click", () => {
     document.getElementById("ui-overlay")?.classList.toggle("hidden");
 });
 
-// Mouse & Pan Events
+// Mouse, Drag, and Zoom Events
 canvas.addEventListener("mousedown", (e) => {
     const rect = canvas.getBoundingClientRect();
     if (currentMode === "drag") {
@@ -591,10 +655,8 @@ canvas.addEventListener("mousedown", (e) => {
 canvas.addEventListener("mousemove", (e) => {
     const rect = canvas.getBoundingClientRect();
     if (isPanning) {
-        panX = (panX + (e.clientX - lastMouseX));
-        while (panX < 0) panX += canvas.width;
-        panX %= canvas.width;
-        panY = Math.max(-canvas.height * 0.5, Math.min(canvas.height * 0.5, panY + (e.clientY - lastMouseY)));
+        panX += (e.clientX - lastMouseX);
+        panY += (e.clientY - lastMouseY);
         lastMouseX = e.clientX;
         lastMouseY = e.clientY;
         render();
@@ -603,18 +665,32 @@ canvas.addEventListener("mousemove", (e) => {
     }
 });
 
-canvas.addEventListener("mouseup", () => {
+window.addEventListener("mouseup", () => {
     isPanning = false;
     isDrawing = false;
 });
 
+// Smooth Zooming on Mouse Wheel
+canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+    const newZoom = Math.max(0.4, Math.min(5.0, zoom * zoomFactor));
+
+    // Zoom towards cursor location
+    panX = mouseX - (mouseX - panX) * (newZoom / zoom);
+    panY = mouseY - (mouseY - panY) * (newZoom / zoom);
+    zoom = newZoom;
+
+    render();
+}, { passive: false });
+
 window.addEventListener("resize", () => {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    if (mesh) {
-        mesh.width = window.innerWidth;
-        mesh.height = window.innerHeight;
-    }
     render();
 });
 

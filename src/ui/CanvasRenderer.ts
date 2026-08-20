@@ -9,8 +9,8 @@ export class CanvasRenderer {
     }
 
     public render(
-        mesh: MeshEngine, 
-        elevations: Float32Array, 
+        mesh: MeshEngine,
+        elevations: Float32Array,
         riverPaths: number[][] = [],
         viewMode: string = "biome",
         temperatures?: Float32Array,
@@ -20,19 +20,21 @@ export class CanvasRenderer {
         lakes?: Uint8Array,
         offsetX: number = 0,
         offsetY: number = 0,
+        zoom: number = 1.0,
         smooth: boolean = true,
         windX?: Float32Array,
         windY?: Float32Array,
         markers: { x: number, y: number }[] = [],
         customLabels: { text: string, x: number, y: number }[] = []
     ) {
-        if (!this.ctx || !mesh) return;
+        if (!this.ctx || !mesh || !elevations) return;
         const cw = this.ctx.canvas.width;
         const ch = this.ctx.canvas.height;
         const mw = mesh.width;
-        
+        const mh = mesh.height;
+
         this.ctx.clearRect(0, 0, cw, ch);
-        
+
         // Base background based on theme
         if (viewMode === "antique") {
             this.ctx.fillStyle = "#e8d8b8";
@@ -40,25 +42,29 @@ export class CanvasRenderer {
             this.ctx.fillStyle = "#0a0a14";
         } else if (viewMode === "monochrome") {
             this.ctx.fillStyle = "#1e2430";
-        } else if (viewMode === "political") {
+        } else if (viewMode === "political" || viewMode === "provinces") {
             this.ctx.fillStyle = "#1b2838";
         } else {
             this.ctx.fillStyle = "#000044";
         }
         this.ctx.fillRect(0, 0, cw, ch);
-        
-        // Horizontal wrapping draw loop
-        const startX = Math.floor((-offsetX - mw) / mw) * mw;
-        const endX = cw - offsetX;
 
-        for (let x = startX; x <= endX; x += mw) {
+        // Calculate visible repeat range along X axis
+        const scaledWidth = mw * zoom;
+        const startRepeat = Math.floor((-offsetX - scaledWidth) / scaledWidth) - 1;
+        const endRepeat = Math.ceil((cw - offsetX + scaledWidth) / scaledWidth) + 1;
+
+        for (let r = startRepeat; r <= endRepeat; r++) {
+            const xShift = r * mw;
             this.ctx.save();
-            this.ctx.translate(offsetX + x, offsetY);
+            this.ctx.translate(offsetX + xShift * zoom, offsetY);
+            this.ctx.scale(zoom, zoom);
+
             this.drawMesh(mesh, elevations, viewMode, temperatures, moistures, waterFlux, lakes, windX, windY);
             this.drawMarkersAndLabels(markers, customLabels, viewMode);
             this.ctx.restore();
         }
-        
+
         // Post-processing texture overlay for antique theme
         if (viewMode === "antique") {
             this.ctx.fillStyle = "rgba(139, 69, 19, 0.04)";
@@ -67,8 +73,8 @@ export class CanvasRenderer {
     }
 
     private drawMesh(
-        mesh: MeshEngine, 
-        elevations: Float32Array, 
+        mesh: MeshEngine,
+        elevations: Float32Array,
         viewMode: string = "biome",
         temperatures?: Float32Array,
         moistures?: Float32Array,
@@ -84,12 +90,12 @@ export class CanvasRenderer {
         for (let i = 0; i < numPoints; i++) {
             const polygon = mesh.voronoi.cellPolygon(i);
             if (!polygon || polygon.length === 0) continue;
-            
+
             const h = elevations[i];
             const x = mesh.points[i * 2];
             const y = mesh.points[i * 2 + 1];
             let baseColor = "#333333";
-            
+
             try {
                 if (viewMode === "elevation") {
                     if (h <= 0.15) baseColor = "#000044";
@@ -107,7 +113,7 @@ export class CanvasRenderer {
                     else if (h <= 0.6) baseColor = "#eedfc0";
                     else if (h <= 0.8) baseColor = "#dfc8a2";
                     else baseColor = "#c8ab7e";
-                } else if (viewMode === "political") {
+                } else if (viewMode === "political" || viewMode === "provinces") {
                     if (h <= 0.5) baseColor = "#1a2436";
                     else baseColor = "#2c3e50";
                 } else if (viewMode === "cyberpunk") {
@@ -151,12 +157,12 @@ export class CanvasRenderer {
                         const nh = elevations[ni];
                         let dnx = mesh.points[ni * 2] - x;
                         const dny = mesh.points[ni * 2 + 1] - y;
-                        if (dnx > mesh.width * 0.5) dnx -= mesh.width; 
+                        if (dnx > mesh.width * 0.5) dnx -= mesh.width;
                         else if (dnx < -mesh.width * 0.5) dnx += mesh.width;
                         const dist = Math.hypot(dnx, dny);
                         if (dist > 0.01) {
                             const slope = (nh - h) / dist;
-                            dx += slope * (dnx / dist); 
+                            dx += slope * (dnx / dist);
                             dy += slope * (dny / dist);
                         }
                     });
@@ -167,14 +173,14 @@ export class CanvasRenderer {
                 this.ctx.fillStyle = finalColor;
                 this.ctx.strokeStyle = finalColor;
                 this.ctx.lineWidth = 1.0;
-                
+
                 this.ctx.beginPath();
                 const start = polygon[0];
                 this.ctx.moveTo(start[0], start[1]);
                 for (let j = 1; j < polygon.length; j++) {
                     this.ctx.lineTo(polygon[j][0], polygon[j][1]);
                 }
-                this.ctx.closePath(); 
+                this.ctx.closePath();
                 this.ctx.fill();
                 this.ctx.stroke();
 
@@ -200,10 +206,10 @@ export class CanvasRenderer {
                     const neighbors = mesh.getNeighbors(i);
                     if (neighbors.some(ni => elevations[ni] <= 0.5)) {
                         if (viewMode === "antique") {
-                            this.ctx.strokeStyle = "rgba(80, 50, 20, 0.35)";
+                            this.ctx.strokeStyle = "rgba(80, 50, 20, 0.4)";
                             this.ctx.lineWidth = 1.5;
                         } else if (viewMode === "cyberpunk") {
-                            this.ctx.strokeStyle = "rgba(0, 240, 255, 0.8)";
+                            this.ctx.strokeStyle = "rgba(0, 240, 255, 0.85)";
                             this.ctx.lineWidth = 1.8;
                         } else if (viewMode === "monochrome") {
                             this.ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
@@ -212,13 +218,13 @@ export class CanvasRenderer {
                             this.ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
                             this.ctx.lineWidth = 1.2;
                         }
-                        
+
                         this.ctx.beginPath();
                         for (let j = 0; j < polygon.length; j++) {
                             const p1 = polygon[j];
                             const p2 = polygon[(j + 1) % polygon.length];
-                            const onBoundary = (p1[0] <= 0.1 && p2[0] <= 0.1) || 
-                                             (p1[0] >= mesh.width - 0.1 && p2[0] >= mesh.width - 0.1);
+                            const onBoundary = (p1[0] <= 0.1 && p2[0] <= 0.1) ||
+                                (p1[0] >= mesh.width - 0.1 && p2[0] >= mesh.width - 0.1);
                             if (!onBoundary) {
                                 this.ctx.moveTo(p1[0], p1[1]);
                                 this.ctx.lineTo(p2[0], p2[1]);
@@ -250,7 +256,7 @@ export class CanvasRenderer {
                         const p2y = mesh.points[lowestIdx * 2 + 1];
                         const midX = (mesh.points[i * 2] + p2x) / 2 + (Math.sin(mesh.points[i * 2 + 1] * 0.1) * 3);
                         const midY = (mesh.points[i * 2 + 1] + p2y) / 2 + (Math.cos(mesh.points[i * 2] * 0.1) * 3);
-                        
+
                         if (viewMode === "antique") {
                             this.ctx.strokeStyle = "#4a3c2c";
                         } else if (viewMode === "cyberpunk") {
@@ -260,7 +266,7 @@ export class CanvasRenderer {
                         } else {
                             this.ctx.strokeStyle = "#4477ff";
                         }
-                        
+
                         this.ctx.lineWidth = Math.min(6, Math.sqrt(waterFlux[i]) / 1.6);
                         this.ctx.beginPath();
                         this.ctx.moveTo(mesh.points[i * 2], mesh.points[i * 2 + 1]);
@@ -317,8 +323,8 @@ export class CanvasRenderer {
             const b = parseInt(hex.slice(5, 7), 16);
             if (isNaN(r) || isNaN(g) || isNaN(b)) return "#333333";
             return `rgb(${Math.floor(Math.max(0, Math.min(255, r + percent)))}, ${Math.floor(Math.max(0, Math.min(255, g + percent)))}, ${Math.floor(Math.max(0, Math.min(255, b + percent)))})`;
-        } catch (e) { 
-            return "#333333"; 
+        } catch (e) {
+            return "#333333";
         }
     }
 }
